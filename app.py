@@ -1,37 +1,99 @@
 import json
 from datetime import date
 import streamlit as st
+import streamlit.components.v1 as components
 
 from azaven.engine import CycleInput, run_engine, resumen_humano
 
 st.set_page_config(page_title="Aza/Ven – Ajuste por citopenias (HB)", layout="centered")
 
-st.title("Aza/Ven – Ajuste por citopenias (Hospital Británico)")
+st.title("Aza/Ven – Ajuste por citopenias (HB) – Adultos")
 st.caption("Motor institucional (Dr. Matías Carreras) – prototipo")
+
+# Header actions
+colH1, colH2, colH3 = st.columns([3, 1, 1])
+
+with colH2:
+    if st.button("⬆️ Arriba"):
+        components.html("<script>window.scrollTo(0,0);</script>", height=0)
+
+
+def reset_form():
+    # Reset all widget/session state keys
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+    st.rerun()
+
+
+with colH3:
+    st.button("🧹 Limpiar", on_click=reset_form)
+
+with colH1:
+    with st.popover("ℹ️ Referencias / Notas"):
+        st.markdown("- Guía HB: (pegá acá link interno o doc institucional)")
+        st.markdown("- Publicaciones / consensos: (pegá links)")
+        st.markdown("- **Disclaimer**: herramienta de apoyo, no reemplaza juicio clínico.")
+
 
 with st.form("form"):
     st.subheader("Datos del paciente")
-    edad = st.number_input("Edad (años)", min_value=0, max_value=120, value=72, step=1)
+    edad = st.number_input("Edad (años) – Adultos (≥18)", min_value=18, max_value=120, value=72, step=1)
     sexo = st.selectbox("Sexo", ["NA", "F", "M", "X"], index=0)
 
     st.subheader("Ciclo actual")
     ciclo_numero = st.number_input("Número de ciclo", min_value=1, max_value=50, value=2, step=1)
     fecha_inicio_ciclo = st.date_input("Fecha inicio de ciclo", value=date(2025, 11, 1))
-    usar_fecha_siguiente = st.checkbox("Tengo fecha de inicio del próximo ciclo (real/planificada)", value=True)
+
+    # Session-state checkbox so it behaves well with reset and reruns
+    if "usar_fecha_siguiente" not in st.session_state:
+        st.session_state.usar_fecha_siguiente = True
+
+    usar_fecha_siguiente = st.checkbox(
+        "Tengo fecha de inicio del próximo ciclo (real/planificada)",
+        key="usar_fecha_siguiente"
+    )
+
     fecha_inicio_siguiente_ciclo = None
     if usar_fecha_siguiente:
-        fecha_inicio_siguiente_ciclo = st.date_input("Fecha inicio del próximo ciclo", value=date(2025, 12, 20))
+        fecha_inicio_siguiente_ciclo = st.date_input(
+            "Fecha inicio del próximo ciclo",
+            value=date.today()
+        )
 
     st.subheader("PAMO / respuesta (si la tenés)")
-    col1, col2 = st.columns(2)
-    with col1:
-        resultado_pamo = st.selectbox("Resultado (opcional)", ["ND", "A (<5% blastos)", "B (≥5% blastos)"], index=1)
-    with col2:
-        blastos_medula_pct = st.number_input("% blastos médula (opcional)", min_value=0.0, max_value=100.0, value=1.0, step=0.5)
+    pamo = st.radio("PAMO", ["No realizado", "Realizado"], horizontal=True, index=0)
+
+    resultado_pamo = "ND"
+    blastos_medula_pct = None
+
+    if pamo == "Realizado":
+        col1, col2 = st.columns(2)
+        with col1:
+            resultado_pamo = st.selectbox(
+                "Resultado (opcional)",
+                ["ND", "A (<5% blastos)", "B (≥5% blastos)"],
+                index=1
+            )
+        with col2:
+            blastos_medula_pct = st.number_input(
+                "% blastos médula (opcional)",
+                min_value=0.0, max_value=100.0, value=0.0, step=0.5
+            )
 
     st.subheader("Hemograma / citopenias")
-    anc_actual = st.number_input("ANC actual", min_value=0, max_value=200000, value=600, step=50)
-    plt_actual = st.number_input("Plaquetas actuales", min_value=0, max_value=2000000, value=42000, step=1000)
+
+    c_anc, u_anc = st.columns([4, 1])
+    with c_anc:
+        anc_actual = st.number_input("ANC actual", min_value=0, max_value=200000, value=600, step=50)
+    with u_anc:
+        st.markdown("**/µL**")
+
+    c_plt, u_plt = st.columns([4, 1])
+    with c_plt:
+        plt_actual = st.number_input("Plaquetas actuales", min_value=0, max_value=2000000, value=42000, step=1000)
+    with u_plt:
+        st.markdown("**/µL**")
+
     neutropenia_g4 = st.checkbox("Neutropenia G4 (o ANC<500)", value=True)
     plt_lt_25k_dias = st.number_input("Días con PLT <25.000 (si aplica)", min_value=0, max_value=365, value=0, step=1)
 
@@ -60,7 +122,16 @@ with st.form("form"):
     transf_gr = st.checkbox("Transfusión de GR", value=False)
     transf_plt = st.checkbox("Transfusión de plaquetas", value=False)
 
+    with st.expander("📘 Abreviaturas"):
+        st.markdown("""
+- **PAMO**: punción aspiración de médula ósea  
+- **ANC**: neutrófilos absolutos  
+- **PLT**: plaquetas  
+- **G4**: grado 4  
+""")
+
     submitted = st.form_submit_button("Calcular recomendación")
+
 
 if submitted:
     # Mapear resultado_pamo
@@ -89,7 +160,7 @@ if submitted:
         "uso_gcsf": bool(uso_gcsf),
         "transfusion_gr": bool(transf_gr),
         "transfusion_plaquetas": bool(transf_plt),
-        "blastos_medula_pct": float(blastos_medula_pct),
+        "blastos_medula_pct": (float(blastos_medula_pct) if blastos_medula_pct is not None else None),
         "resultado_pamo": res_pamo,
     }
 
