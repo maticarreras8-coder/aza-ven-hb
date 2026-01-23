@@ -8,52 +8,71 @@ from azaven.engine import CycleInput, run_engine, resumen_humano
 st.set_page_config(page_title="Aza/Ven – Ajuste por citopenias (HB)", layout="centered")
 
 # -------------------------
-# Helpers: reset + scroll
+# Defaults + Reset robusto
 # -------------------------
 DEFAULTS = {
+    # Paciente
     "edad": 72,
     "sexo": "NA",
+
+    # Ciclo
     "ciclo_numero": 2,
     "fecha_inicio_ciclo": date(2025, 11, 1),
-
     "usar_fecha_siguiente": True,
     "fecha_inicio_siguiente_ciclo": date.today(),
 
+    # PAMO
     "pamo_realizada": "No realizado",
-    "resultado_pamo": "ND",
+    "resultado_pamo_label": "ND",
     "blastos_text": "",
 
+    # Hemograma
     "anc_actual": 600,
     "plt_actual": 42000,
     "neutropenia_g4": True,
     "plt_lt_25k_dias": 0,
 
+    # Tratamiento
     "aza_dosis": 75.0,
     "aza_dias": 7,
     "ven_obj": 400,
     "ven_dias_plan": 21,
 
+    # Antifúngico
     "antif": "posaconazole",
+
+    # Delay
     "motivo_delay": "ninguno",
     "infeccion_fiebre": False,
 
+    # Soporte
     "uso_gcsf": False,
     "transf_gr": False,
     "transf_plt": False,
+
+    # Referencias (editables)
+    "ref_guia": "",
+    "ref_paper": "",
 }
+
+def init_defaults():
+    for k, v in DEFAULTS.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 def reset_form():
     for k, v in DEFAULTS.items():
         st.session_state[k] = v
+    # cerrar refs si estaba abierto
+    st.session_state["show_refs"] = False
     st.rerun()
 
 def scroll_top():
     components.html("<script>window.scrollTo(0,0);</script>", height=0)
 
-# init defaults once
-for k, v in DEFAULTS.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+init_defaults()
+if "show_refs" not in st.session_state:
+    st.session_state["show_refs"] = False
 
 
 # -------------------------
@@ -62,35 +81,38 @@ for k, v in DEFAULTS.items():
 st.title("Aza/Ven – Ajuste por citopenias (Hospital Británico) – Adultos")
 st.caption("Motor institucional (Dr. Matías Carreras) – prototipo")
 
-colH1, colH2, colH3, colH4 = st.columns([6, 1, 1, 1])
+colH1, colH2, colH3, colH4 = st.columns([7, 1, 1, 1])
+
 with colH2:
-    if st.button("ℹ️", help="Referencias / guía"):
-        st.session_state["_show_refs"] = True
+    if st.button("ℹ️", key="btn_info", help="Referencias / guía"):
+        st.session_state["show_refs"] = not st.session_state["show_refs"]
+
 with colH3:
-    st.button("🧹 Limpiar", on_click=reset_form)
+    st.button("🧹", key="btn_reset", help="Limpiar formulario", on_click=reset_form)
+
 with colH4:
-    if st.button("⬆️ Arriba"):
+    if st.button("⬆️", key="btn_top", help="Ir arriba"):
         scroll_top()
 
-# Popover simple (sin sidebar)
-if st.session_state.get("_show_refs", False):
-    with st.expander("ℹ️ Referencias / guía", expanded=True):
-        st.markdown("- Guía HB: **PEGAR LINK ACÁ**")
-        st.markdown("- Paper / consenso: **PEGAR LINK ACÁ**")
+# Referencias (como pidió el doc: botón info con links)
+if st.session_state["show_refs"]:
+    with st.expander("ℹ️ Referencias / guía (pegá tus links)", expanded=True):
+        st.text_input("Guía HB (link)", key="ref_guia", placeholder="https://...")
+        st.text_input("Paper / consenso (link)", key="ref_paper", placeholder="https://...")
         st.markdown("- Disclaimer: herramienta de apoyo; no reemplaza juicio clínico.")
-        if st.button("Cerrar"):
-            st.session_state["_show_refs"] = False
+        if st.button("Cerrar", key="btn_close_refs"):
+            st.session_state["show_refs"] = False
             st.rerun()
 
 st.divider()
 
 
 # -------------------------
-# Inputs (SIN form -> reactivos)
+# Inputs (SIN st.form -> reactivos)
 # -------------------------
 st.subheader("Datos del paciente")
 edad = st.number_input("Edad (años) – Adultos (≥18)", min_value=18, max_value=120, step=1, key="edad")
-sexo = st.selectbox("Sexo", ["NA", "F", "M", "X"], index=["NA","F","M","X"].index(st.session_state["sexo"]), key="sexo")
+sexo = st.selectbox("Sexo", ["NA", "F", "M", "X"], key="sexo")
 
 st.subheader("Ciclo actual")
 ciclo_numero = st.number_input("Número de ciclo", min_value=1, max_value=50, step=1, key="ciclo_numero")
@@ -105,26 +127,24 @@ fecha_inicio_siguiente_ciclo = None
 if usar_fecha_siguiente:
     fecha_inicio_siguiente_ciclo = st.date_input("Fecha inicio del próximo ciclo", key="fecha_inicio_siguiente_ciclo")
 else:
-    # si lo desmarcás, desaparece y queda nulo (sin “calcular”)
-    fecha_inicio_siguiente_ciclo = None
+    fecha_inicio_siguiente_ciclo = None  # desaparece instantáneo
 
 
 st.subheader("PAMO / respuesta")
 pamo_realizada = st.radio("PAMO", ["No realizado", "Realizado"], horizontal=True, key="pamo_realizada")
 
-resultado_pamo = None
-blastos_medula_pct = None
+resultado_pamo = None          # para el motor
+blastos_medula_pct = None      # para el motor
 
 if pamo_realizada == "Realizado":
-    # ESCENARIOS "como los tenías" (ND / A / B)
+    # Escenarios como estaban: ND/A/B
     resultado_pamo_label = st.selectbox(
-        "Resultado (escenarios)",
+        "Escenario (si la tenés)",
         ["ND", "A (<5% blastos)", "B (≥5% blastos)"],
-        index=0 if st.session_state["resultado_pamo"] == "ND" else (1 if st.session_state["resultado_pamo"] == "A" else 2),
-        key="resultado_pamo"
+        key="resultado_pamo_label"
     )
 
-    # blastos opcional REAL: string vacío -> None (evita 0 por defecto)
+    # Blastos opcional real (vacío => None; evita el “0” por defecto)
     blastos_text = st.text_input(
         "% blastos médula (opcional) – dejá vacío si no lo tenés",
         key="blastos_text",
@@ -141,7 +161,7 @@ if pamo_realizada == "Realizado":
             st.error("Blastos: ingresá un número válido (ej 1.5).")
             blastos_medula_pct = None
 
-    # map resultado
+    # map a lo que espera el motor
     if resultado_pamo_label.startswith("A"):
         resultado_pamo = "A"
     elif resultado_pamo_label.startswith("B"):
@@ -149,8 +169,8 @@ if pamo_realizada == "Realizado":
     else:
         resultado_pamo = None
 else:
-    # No realizado -> todo apagado
-    st.session_state["resultado_pamo"] = "ND"
+    # No realizado => limpiar campos y dejar Nones
+    st.session_state["resultado_pamo_label"] = "ND"
     st.session_state["blastos_text"] = ""
     resultado_pamo = None
     blastos_medula_pct = None
@@ -174,15 +194,16 @@ with col4:
 
 
 st.subheader("Antifúngico (HB)")
-antif = st.selectbox("Antifúngico", ["none", "isavuconazole", "voriconazole", "posaconazole"],
-                     index=["none","isavuconazole","voriconazole","posaconazole"].index(st.session_state["antif"]),
-                     key="antif")
+antif = st.selectbox(
+    "Antifúngico",
+    ["none", "isavuconazole", "voriconazole", "posaconazole"],
+    key="antif"
+)
 
 st.subheader("Contexto del delay / intercurrencias")
 motivo_delay = st.selectbox(
     "Motivo principal de demora (si aplica)",
     ["ninguno", "citopenias_tratamiento", "infeccion", "sangrado", "internacion", "otro"],
-    index=["ninguno","citopenias_tratamiento","infeccion","sangrado","internacion","otro"].index(st.session_state["motivo_delay"]),
     key="motivo_delay"
 )
 infeccion_fiebre = st.checkbox("Fiebre / infección intercurrente (flag)", key="infeccion_fiebre")
@@ -192,18 +213,9 @@ uso_gcsf = st.checkbox("Usó/usa G-CSF", key="uso_gcsf")
 transf_gr = st.checkbox("Transfusión de GR", key="transf_gr")
 transf_plt = st.checkbox("Transfusión de plaquetas", key="transf_plt")
 
-
 st.divider()
 
-# Botones también abajo (para cuando estás scrolleando)
-colB1, colB2, colB3 = st.columns([6, 1, 1])
-with colB2:
-    st.button("🧹 Limpiar", on_click=reset_form)
-with colB3:
-    if st.button("⬆️ Arriba", key="arriba_bottom"):
-        scroll_top()
-
-calcular = st.button("Calcular recomendación", type="primary")
+calcular = st.button("Calcular recomendación", type="primary", key="btn_calcular")
 
 
 # -------------------------
@@ -215,20 +227,27 @@ if calcular:
         "sexo": sexo,
         "ciclo_numero": int(ciclo_numero),
         "fecha_inicio_ciclo": str(fecha_inicio_ciclo),
+
         "anc_actual": int(anc_actual),
         "plt_actual": int(plt_actual),
         "neutropenia_g4": bool(neutropenia_g4),
         "plt_lt_25k_dias": int(plt_lt_25k_dias),
+
         "aza_dosis_mg_m2": float(aza_dosis),
         "aza_dias_total": int(aza_dias),
+
         "ven_dosis_objetivo_mg": int(ven_obj),
         "ven_dias_plan": int(ven_dias_plan),
+
         "antifungico_clase": antif,
+
         "motivo_delay": motivo_delay,
         "infeccion_fiebre_intercurrencia": bool(infeccion_fiebre),
+
         "uso_gcsf": bool(uso_gcsf),
         "transfusion_gr": bool(transf_gr),
         "transfusion_plaquetas": bool(transf_plt),
+
         "blastos_medula_pct": blastos_medula_pct,
         "resultado_pamo": resultado_pamo,
     }
